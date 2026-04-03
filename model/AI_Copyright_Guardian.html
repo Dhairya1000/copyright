@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Copyright Guardian</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        background: '#0f172a',
+                        card: '#1e293b',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- HTML2Canvas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f1f5f9; }
+        h1, h2, h3, .font-outfit { font-family: 'Outfit', sans-serif; }
+        .glassmorphism { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.5); box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5); }
+        .gradient-text { background: linear-gradient(to right, #60a5fa, #818cf8); -webkit-background-clip: text; color: transparent; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Sample Dataset
+        const sampleDataset = [
+            { id: 1, title: "The Silent Cosmos", text: "In the vast emptiness of the silent cosmos, stars flicker like ancient beacons. Humanity has long looked up, wondering if we are truly alone. The answer lies not in the stars, but in the spaces between them, where the dark matter dances to the tune of the universe." },
+            { id: 2, title: "Corporate Synergy Report", text: "Synergy is more than a buzzword; it is the lifeblood of our operational efficiency. By leveraging cross-functional paradigms, we empower our workforce to deliver cutting-edge solutions that proactively address market demands." },
+            { id: 3, title: "Quantum Computing Basics", text: "Quantum neural networks integrate the principles of superposition with deep learning architectures. This convergence allows for parallel processing of exponentially large state spaces." }
+        ];
+
+        // Math Utils
+        function cosineSimilarity(vecA, vecB) {
+            let dotProduct = 0, normA = 0, normB = 0;
+            for (let i = 0; i < vecA.length; i++) {
+                dotProduct += vecA[i] * vecB[i];
+                normA += vecA[i] * vecA[i];
+                normB += vecB[i] * vecB[i];
+            }
+            if (normA === 0 || normB === 0) return 0;
+            return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+        }
+
+        function App() {
+            const apiKey = 'AIzaSyCZUxn1lD98khSDUPop9dd0qrAwKQ6gcCI';
+            const [text, setText] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [statusMsg, setStatusMsg] = useState('');
+            
+            // Memory storage for dataset embeddings
+            const datasetEmbeddings = useRef(new Map());
+
+            useEffect(() => {
+                lucide.createIcons();
+            });
+
+            const callGemini = async (model, action, payload) => {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${action}?key=${apiKey}`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error?.message || "API Request Failed");
+                }
+                return await res.json();
+            };
+
+            const analyzeText = async () => {
+                if (!text.trim()) return alert("Please enter text to analyze.");
+                setLoading(true);
+                setResult(null);
+                
+                try {
+                    // 1. Prepare Dataset Embeddings
+                    setStatusMsg('Indexing sample dataset with Gemini...');
+                    for (const item of sampleDataset) {
+                        if (!datasetEmbeddings.current.has(item.id)) {
+                            const res = await callGemini('gemini-embedding-001', 'embedContent', {
+                                content: { parts: [{ text: item.text }] }
+                            });
+                            datasetEmbeddings.current.set(item.id, res.embedding.values);
+                        }
+                    }
+
+                    // 2. Embed user input
+                    setStatusMsg('Generating Gemini fingerprint for input...');
+                    const userEmbedRes = await callGemini('gemini-embedding-001', 'embedContent', {
+                        content: { parts: [{ text: text }] }
+                    });
+                    const userEmbedding = userEmbedRes.embedding.values;
+
+                    // 3. Similarity Math
+                    setStatusMsg('Running cosine similarity engine...');
+                    let bestMatch = null;
+                    let highestScore = 0;
+
+                    for (const item of sampleDataset) {
+                        const dbEmbed = datasetEmbeddings.current.get(item.id);
+                        const score = cosineSimilarity(userEmbedding, dbEmbed);
+                        const percentage = Math.max(0, Math.min(100, Math.round(score * 100)));
+                        if (percentage > highestScore) {
+                            highestScore = percentage;
+                            bestMatch = item;
+                        }
+                    }
+
+                    let riskLevel = "Low";
+                    if (highestScore > 80) riskLevel = "High";
+                    else if (highestScore > 40) riskLevel = "Medium";
+
+                    // 4. Gemini Reasoning
+                    setStatusMsg('Drafting ownership explanation and safe rewrites...');
+                    const sysExplainer = "Explain who legally owns this text (assume AI generated), its transformative nature, and basic copyright interpretation. Explain it simply like I'm 10 years old:\n\n" + text;
+                    const sysRewrite = "Rewrite the provided text to reduce similarity to existing copyrighted work. Make it completely safe and original while retaining core meaning:\n\n" + text;
+
+                    const explainerRes = await callGemini('gemini-2.5-flash', 'generateContent', {
+                        contents: [{ parts: [{ text: sysExplainer }] }]
+                    });
+                    
+                    const rewriteRes = await callGemini('gemini-2.5-flash', 'generateContent', {
+                        contents: [{ parts: [{ text: sysRewrite }] }]
+                    });
+
+                    setResult({
+                        originalText: text,
+                        similarityScore: highestScore,
+                        riskLevel,
+                        matchedSource: bestMatch,
+                        ownershipExplanation: explainerRes.candidates[0].content.parts[0].text,
+                        rewriteSuggestion: rewriteRes.candidates[0].content.parts[0].text
+                    });
+
+                } catch (error) {
+                    alert("Analysis Error: " + error.message);
+                } finally {
+                    setLoading(false);
+                    setStatusMsg('');
+                    setTimeout(() => lucide.createIcons(), 100);
+                }
+            };
+
+            const downloadMetricsPNG = () => {
+                const element = document.getElementById("metrics-dashboard");
+                if (!element) return;
+                
+                // Hide download button temporarily for the screenshot
+                const btn = document.getElementById("download-btn");
+                if (btn) btn.style.display = 'none';
+
+                html2canvas(element, { backgroundColor: '#0f172a', scale: 2 }).then((canvas) => {
+                    if (btn) btn.style.display = 'flex';
+                    const link = document.createElement('a');
+                    link.download = `AI_Copyright_Report_${Date.now()}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                }).catch(err => {
+                    console.error("Failed to generate PNG", err);
+                    if (btn) btn.style.display = 'flex';
+                    alert("Failed to capture metrics. See console.");
+                });
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center p-4 md:p-8">
+                    <header className="w-full max-w-6xl flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-3">
+                            <i data-lucide="shield" className="w-8 h-8 text-indigo-400"></i>
+                            <h1 className="text-3xl font-bold">AI Copyright <span className="gradient-text">Guardian</span></h1>
+                        </div>
+                    </header>
+                    
+                    <main className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        
+                        {/* Input Section */}
+                        <div className="lg:col-span-4 flex flex-col gap-6">
+                            <div className="glassmorphism p-6 rounded-2xl">
+                                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                    <i data-lucide="file-text" className="w-5 h-5 text-blue-400"></i> Code / Text Input
+                                </h2>
+                                <textarea 
+                                    className="w-full h-48 bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm resize-none focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-600"
+                                    placeholder="Paste the generated text here..."
+                                    value={text}
+                                    onChange={(e) => setText(e.target.value)}
+                                    disabled={loading}
+                                ></textarea>
+                                
+                                <button 
+                                    onClick={analyzeText}
+                                    disabled={loading || text.length < 5}
+                                    className="w-full mt-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-semibold flex justify-center items-center gap-2 py-3 rounded-lg shadow-lg"
+                                >
+                                    {loading ? (
+                                        <><i data-lucide="loader-2" className="w-5 h-5 animate-spin"></i> Analyzing IP...</>
+                                    ) : (
+                                        <><i data-lucide="search" className="w-5 h-5"></i> Audit Text</>
+                                    )}
+                                </button>
+                                {loading && <p className="text-xs text-center text-indigo-400 mt-3 animate-pulse">{statusMsg}</p>}
+                            </div>
+                            
+                            <div className="glassmorphism p-6 rounded-2xl text-sm text-slate-300 space-y-3">
+                                <h3 className="font-semibold text-slate-100 flex items-center justify-between mb-2">
+                                   Internal Database <span className="px-2 py-0.5 bg-slate-700 rounded text-xs">VIRTUAL</span>
+                                </h3>
+                                <p>This browser prototype checks your text against 3 simulated copyrighted sources:</p>
+                                <ul className="list-disc pl-4 space-y-1 text-xs text-slate-400">
+                                    <li>"The Silent Cosmos" (Sci-fi passage)</li>
+                                    <li>"Corporate Synergy Report" (Business text)</li>
+                                    <li>"Quantum Computing Basics" (Academic abstract)</li>
+                                </ul>
+                                <p className="text-xs italic text-slate-500 pt-2">Try pasting one of these topics to see detection in action.</p>
+                            </div>
+                        </div>
+
+                        {/* Dashboard Results Section */}
+                        <div className="lg:col-span-8">
+                            {!result && !loading ? (
+                                <div className="glassmorphism w-full h-full min-h-[400px] flex flex-col items-center justify-center p-8 text-center rounded-2xl border-dashed border-2 border-slate-700/50">
+                                    <i data-lucide="layout-dashboard" className="w-16 h-16 text-slate-700 mb-4"></i>
+                                    <h3 className="font-semibold text-slate-300">Awaiting Submissions</h3>
+                                    <p className="text-sm text-slate-500 mt-2 max-w-sm">No backend needed. All computation is handled via Javascript. Input your text to see the magic.</p>
+                                </div>
+                            ) : result ? (
+                                <div id="metrics-dashboard" className="flex flex-col gap-6 animate-fadeIn pb-4">
+                                    <div className="flex justify-between items-center bg-slate-900 border-b border-slate-800 pb-4">
+                                        <h2 className="text-xl font-bold font-outfit text-slate-100 flex items-center gap-2">
+                                            <i data-lucide="shield-check" className="w-6 h-6 text-indigo-400"></i> Analysis Report
+                                        </h2>
+                                        <button 
+                                            id="download-btn"
+                                            onClick={downloadMetricsPNG}
+                                            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-sm font-medium rounded-lg border border-slate-700 transition-colors shadow-lg"
+                                        >
+                                            <i data-lucide="download" className="w-4 h-4 text-emerald-400"></i>
+                                            Download PNG
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        
+                                        {/* Score Card */}
+                                        <div className="glassmorphism p-6 rounded-2xl flex items-center justify-between">
+                                            <div>
+                                                <p className="text-sm text-slate-400 font-semibold uppercase tracking-wider mb-2">Similarity Engine</p>
+                                                <p className="text-5xl font-outfit font-bold font-mono">
+                                                    {result.similarityScore}<span className="text-2xl text-slate-500">%</span>
+                                                </p>
+                                            </div>
+                                            <div className="w-20 h-20 relative flex items-center justify-center">
+                                                 <svg className="w-full h-full transform -rotate-90">
+                                                     <circle cx="40" cy="40" r="36" stroke="gray" strokeWidth="6" fill="transparent" opacity="0.2"/>
+                                                     <circle cx="40" cy="40" r="36" stroke={result.similarityScore > 80 ? '#f43f5e' : result.similarityScore > 40 ? '#f59e0b' : '#3b82f6'} strokeWidth="6" fill="transparent"
+                                                         strokeDasharray={`${result.similarityScore * 2.26} 226`} />
+                                                 </svg>
+                                            </div>
+                                        </div>
+
+                                        {/* Risk Assessment */}
+                                        <div className={`glassmorphism p-6 rounded-2xl border-2 ${
+                                            result.riskLevel === 'High' ? 'border-rose-500/50 bg-rose-500/10' :
+                                            result.riskLevel === 'Medium' ? 'border-amber-500/50 bg-amber-500/10' :
+                                            'border-emerald-500/50 bg-emerald-500/10'
+                                        }`}>
+                                            <p className="text-sm uppercase font-semibold opacity-80 mb-2">Risk Assessment</p>
+                                            <div className="flex items-center gap-3">
+                                                 <i data-lucide={result.riskLevel === 'High' ? 'alert-triangle' : 'shield-check'} className="w-8 h-8"></i>
+                                                 <span className="text-4xl font-outfit font-bold uppercase">{result.riskLevel}</span>
+                                            </div>
+                                            {result.matchedSource && <p className="text-sm mt-3 opacity-90"><span className="font-semibold">Match Found:</span> {result.matchedSource.title}</p>}
+                                        </div>
+                                    </div>
+
+                                    {/* Explain Like I'm 10 */}
+                                    <div className="glassmorphism p-6 rounded-2xl">
+                                        <h3 className="font-semibold flex gap-2 items-center text-indigo-400 mb-3">
+                                            <i data-lucide="book-open" className="w-5 h-5"></i> Legal Interpretation (ELI10)
+                                        </h3>
+                                        <p className="text-slate-300 text-sm leading-relaxed bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                            {result.ownershipExplanation}
+                                        </p>
+                                    </div>
+
+                                    {/* Safe Rewrite */}
+                                    <div className="glassmorphism p-6 rounded-2xl bg-gradient-to-r from-emerald-900/40 to-teal-900/40 border border-emerald-500/30">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h3 className="font-semibold flex gap-2 items-center text-emerald-400">
+                                                <i data-lucide="edit-3" className="w-5 h-5"></i> Suggested Safe Rewrite
+                                            </h3>
+                                            <button 
+                                                onClick={() => { navigator.clipboard.writeText(result.rewriteSuggestion); alert("Copied to clipboard!"); }}
+                                                className="text-xs bg-emerald-500/20 text-emerald-300 py-1 px-3 rounded hover:bg-emerald-500/30"
+                                            >
+                                                Copy
+                                            </button>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <p className="text-xs font-semibold text-rose-400/80 mb-2">SOURCE MATERIAL</p>
+                                                <div className="text-xs text-slate-400 bg-black/40 p-3 rounded h-full">"{result.originalText}"</div>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-semibold text-emerald-400 mb-2">REWRITTEN SECURELY</p>
+                                                <div className="text-sm text-slate-200 bg-emerald-950/40 border border-emerald-500/20 p-3 rounded h-full">{result.rewriteSuggestion}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            ) : null}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
